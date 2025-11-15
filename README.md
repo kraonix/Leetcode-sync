@@ -1,0 +1,2 @@
+# Leetcode-sync
+Chrome extension
