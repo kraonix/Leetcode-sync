@@ -34,7 +34,7 @@ function toBase64(str) {
 }
 
 // --------------------------------------
-// FULL Monaco Code Scraper (100% Reliable)
+// FULL Monaco Code Scraper
 // --------------------------------------
 async function scrapeCode() {
   try {
@@ -61,7 +61,7 @@ async function scrapeCode() {
 
 
 // --------------------------------------
-// Extract Problem Title (New LC UI)
+// Extract Problem Title
 // --------------------------------------
 function getProblemTitle() {
   // New UI
