@@ -1,10 +1,20 @@
-// ======================================
-// LeetSync — Content Script (Final Stable)
-// ======================================
+// Debug flag
+window.__leetsync_test = "LOADED";
+console.log("%c[LeetSync] content.js LOADED", "color:#4ade80;font-weight:bold;");
 
-// ------------------------------
-// Helper: Promisified storage
-// ------------------------------
+// ======================================
+// Listen for popup "push_now"
+// ======================================
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.action === "push_now") {
+    console.log("[LeetSync] Push triggered from popup");
+    startPushFlow();
+  }
+});
+
+// ======================================
+// Promisified storage
+// ======================================
 function getStorage(keys) {
   return new Promise((res) =>
     chrome.storage.sync.get(keys, (items) => res(items))
@@ -12,114 +22,57 @@ function getStorage(keys) {
 }
 
 // ======================================
-// 1. Submit Button Detection (Guaranteed Working)
+// UTF-8 SAFE Base64 encoding
 // ======================================
-function hookSubmitButton() {
-  // The REAL submit button on LeetCode:
-  // <button data-e2e-locator="console-submit-button">...</button>
-  const getSubmitButton = () =>
-    document.querySelector(
-      'button[data-e2e-locator="console-submit-button"]'
-    );
-
-  const attach = (btn) => {
-    if (!btn) return;
-    if (btn.dataset.leetsyncAttached) return;
-
-    btn.dataset.leetsyncAttached = "1";
-
-    btn.addEventListener(
-      "click",
-      () => {
-        setTimeout(onSubmitDetected, 300); // wait for LC to process submission
-      },
-      { capture: true }
-    );
-  };
-
-  // Try immediate attach
-  let btn = getSubmitButton();
-  if (btn) attach(btn);
-
-  // Observe DOM changes
-  const mo = new MutationObserver(() => {
-    const b = getSubmitButton();
-    if (b) attach(b);
-  });
-
-  mo.observe(document.body, { childList: true, subtree: true });
-
-  // Retry loop (safety)
-  let tries = 0;
-  const interval = setInterval(() => {
-    tries++;
-    const b = getSubmitButton();
-    if (b) {
-      attach(b);
-      clearInterval(interval);
-    }
-    if (tries > 25) clearInterval(interval);
-  }, 300);
-}
-
-hookSubmitButton();
-
-// ======================================
-// 2. Toast UI
-// ======================================
-function removeToast() {
-  const old = document.querySelector(".leetsync-toast");
-  if (old) old.remove();
-}
-
-function showToast(titleShort) {
-  removeToast();
-  const t = document.createElement("div");
-  t.className = "leetsync-toast";
-  t.innerHTML = `
-    <div style="min-width:0;">
-      <div style="font-weight:600">Push submission to GitHub?</div>
-      <div style="font-size:12px;color:#94a3b8;margin-top:6px">${titleShort}</div>
-    </div>
-    <div class="actions">
-      <button class="leetsync-btn" id="leetsync-push">Push to Repo</button>
-      <button class="leetsync-cancel" id="leetsync-cancel">Cancel</button>
-    </div>
-  `;
-  document.body.appendChild(t);
-
-  document.getElementById("leetsync-cancel").onclick = () => t.remove();
-  document.getElementById("leetsync-push").onclick = () => {
-    t.remove();
-    startPushFlow();
-  };
-}
-
-async function onSubmitDetected() {
-  const title =
-    document.querySelector("a[data-cy='question-title']")?.innerText ||
-    document.querySelector("h1")?.innerText ||
-    "LeetCode Problem";
-
-  const short = title.length > 80 ? title.slice(0, 77) + "…" : title;
-
-  showToast(short);
+function toBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = "";
+  for (let b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
 }
 
 // ======================================
-// 3. Extract Code
+// FULL CODE SCRAPER (Monaco + fallbacks)
 // ======================================
 function scrapeCode() {
+  try {
+    // Monaco model → best method, always full code
+    const model = window.monaco?.editor?.getModels?.()[0];
+    if (model) {
+      const full = model.getValue();
+      if (full && full.length > 0) return full;
+    }
+  } catch (err) {
+    console.warn("[LeetSync] Monaco scrape error:", err);
+  }
+
+  // Fallback: visible Monaco lines
   const monacoLines = document.querySelectorAll(".view-line");
   if (monacoLines.length)
     return [...monacoLines].map((l) => l.innerText).join("\n");
 
+  // Fallback: textarea
   const ta = document.querySelector("textarea");
   if (ta) return ta.value || ta.innerText;
 
   return "";
 }
 
+// ======================================
+// Problem Title → Clean filename
+// ======================================
+function getProblemTitle() {
+  const el = document.querySelector("a[data-cy='question-title']");
+  if (!el) return "LeetCode Problem";
+
+  let raw = el.innerText.trim();  // e.g., "52. N-Queens II"
+  raw = raw.replace(/[\\/:*?"<>|]/g, ""); // remove invalid chars
+  return raw;
+}
+
+// ======================================
+// Detect active language
+// ======================================
 function detectLanguage() {
   const el =
     document.querySelector(".ant-select-selection-item") ||
@@ -134,37 +87,37 @@ function guessExtension(lang) {
   if (lang.includes("python")) return ".py";
   if (lang.includes("java")) return ".java";
   if (lang.includes("js")) return ".js";
-  if (lang.includes("c#")) return ".cs";
+  if (lang.includes("c#") || lang.includes("csharp")) return ".cs";
   return ".txt";
 }
 
-function sanitizeFilename(name) {
-  return name.replace(/[\\/:*?"<>|]/g, "").trim();
-}
-
 // ======================================
-// 4. Start Push Flow
+// MAIN PUSH FLOW
 // ======================================
 async function startPushFlow() {
+  console.log("[LeetSync] Starting push...");
+
   const code = scrapeCode();
-  if (code.length < 5) return alert("Code not detected.");
+  if (!code || code.length < 2) {
+    alert("LeetSync: Could not read code. Ensure the editor is visible.");
+    return;
+  }
 
-  const title =
-    document.querySelector("a[data-cy='question-title']")?.innerText ||
-    document.querySelector("h1")?.innerText ||
-    "Problem";
-
-  const filename =
-    sanitizeFilename(title) + guessExtension(detectLanguage());
+  const cleanTitle = getProblemTitle();
+  const filename = cleanTitle + guessExtension(detectLanguage());
 
   const creds = await getStorage(["token", "username", "repo", "branch"]);
-  if (!creds.token) return alert("GitHub token missing in popup.");
-  if (!creds.username || !creds.repo)
-    return alert("GitHub username or repo missing.");
+
+  if (!creds.token || !creds.username || !creds.repo) {
+    alert("LeetSync: Missing GitHub info. Click Update Info.");
+    return;
+  }
 
   const api = `https://api.github.com/repos/${creds.username}/${creds.repo}/contents/${encodeURIComponent(
     filename
   )}`;
+
+  console.log("[LeetSync] Checking file:", api);
 
   const exists = await fetch(api, {
     headers: { Authorization: `Bearer ${creds.token}` },
@@ -172,67 +125,25 @@ async function startPushFlow() {
 
   if (exists.status === 200) {
     const data = await exists.json();
-    showAppendModal(filename, code, data.sha, creds);
+    const old = atob(data.content.replace(/\n/g, ""));
+    const combined = `${old}\n\n// --- New Submission ---\n${code}`;
+    pushFile(filename, combined, data.sha, creds);
   } else {
     pushFile(filename, code, null, creds);
   }
 }
 
 // ======================================
-// 5. Append Modal
-// ======================================
-function showAppendModal(filename, newCode, sha, creds) {
-  const back = document.createElement("div");
-  back.className = "leetsync-modal-backdrop";
-
-  const m = document.createElement("div");
-  m.className = "leetsync-modal";
-  m.innerHTML = `
-    <h4>File Already Exists</h4>
-    <div style="color:#94a3b8">${filename}</div>
-    <div style="margin-top:10px;font-size:13px">Append new submission?</div>
-    <div class="row">
-      <button class="leetsync-append" id="append-yes">Append</button>
-      <button class="leetsync-cancel-2" id="append-no">Cancel</button>
-    </div>
-  `;
-
-  document.body.append(back, m);
-
-  document.getElementById("append-no").onclick = () => {
-    m.remove();
-    back.remove();
-  };
-
-  document.getElementById("append-yes").onclick = async () => {
-    m.remove();
-    back.remove();
-
-    const url = `https://api.github.com/repos/${creds.username}/${creds.repo}/contents/${encodeURIComponent(
-      filename
-    )}`;
-
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${creds.token}` },
-    });
-
-    const data = await res.json();
-    const old = atob(data.content.replace(/\n/g, ""));
-    const combined = `${old}\n\n// --- New Submission ---\n${newCode}`;
-
-    pushFile(filename, combined, data.sha, creds);
-  };
-}
-
-// ======================================
-// 6. Push File
+// PUSH TO GITHUB
 // ======================================
 async function pushFile(filename, code, sha, creds) {
+  console.log("[LeetSync] Uploading:", filename);
+
   const api = `https://api.github.com/repos/${creds.username}/${creds.repo}/contents/${encodeURIComponent(
     filename
   )}`;
 
-  const contentBase64 = btoa(unescape(encodeURIComponent(code)));
+  const contentBase64 = toBase64(code);
 
   const body = {
     message: sha
@@ -254,21 +165,32 @@ async function pushFile(filename, code, sha, creds) {
   });
 
   if (res.status === 200 || res.status === 201) {
+    console.log("[LeetSync] Push successful!");
     flashTiny("Pushed to GitHub 🎉");
   } else {
     const txt = await res.text();
-    console.error("GitHub Push Error:", res.status, txt);
-    alert("Push failed — open console.");
+    console.error("[LeetSync] Push error:", res.status, txt);
+    alert("LeetSync: Push failed. See console.");
   }
 }
 
 // ======================================
-// 7. Tiny Success Toast
+// TOAST
 // ======================================
 function flashTiny(msg) {
   const el = document.createElement("div");
-  el.className = "leetsync-toast";
   el.innerHTML = `<div style="font-weight:600">${msg}</div>`;
+  Object.assign(el.style, {
+    position: "fixed",
+    top: "20px",
+    right: "20px",
+    background: "#121314",
+    padding: "12px 16px",
+    color: "white",
+    borderRadius: "10px",
+    zIndex: 999999,
+    boxShadow: "0 6px 20px rgba(0,0,0,0.35)",
+  });
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2200);
+  setTimeout(() => el.remove(), 2000);
 }

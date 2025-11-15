@@ -6,12 +6,22 @@
     "permissions": ["storage", "activeTab", "scripting"],
     "host_permissions": [
         "https://leetcode.com/*",
+        "https://www.leetcode.com/*",
+        "https://leetcode.cn/*",
+        "https://www.leetcode.cn/*",
         "https://api.github.com/*"
     ],
     "content_scripts": [{
-        "matches": ["https://leetcode.com/*"],
+        "matches": [
+            "https://leetcode.com/*",
+            "https://www.leetcode.com/*",
+            "https://leetcode.cn/*",
+            "https://www.leetcode.cn/*"
+        ],
         "js": ["content.js"],
-        "css": ["ui.css"]
+        "css": ["ui.css"],
+        "all_frames": true,
+        "run_at": "document_idle"
     }],
     "action": {
         "default_popup": "popup.html",
