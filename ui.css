@@ -1,0 +1,92 @@
+/* Toast (top-right) */
+.leetsync-toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #121314;
+    /* dark like LC */
+    color: #e6eef8;
+    padding: 12px 14px;
+    border-radius: 10px;
+    box-shadow: 0 6px 18px rgba(2, 6, 23, 0.6);
+    z-index: 2147483647;
+    font-size: 13px;
+    max-width: 360px;
+    border: 1px solid rgba(255, 255, 255, 0.03);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+
+.leetsync-toast .actions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px
+}
+
+.leetsync-btn {
+    background: #ffa116;
+    border-radius: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    color: black;
+    font-weight: 700;
+    border: none;
+}
+
+.leetsync-cancel {
+    background: transparent;
+    color: #94a3b8;
+    border: none;
+    cursor: pointer;
+}
+
+
+/* Modal (center) */
+.leetsync-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483646;
+    background: rgba(4, 6, 10, 0.5);
+}
+
+.leetsync-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: #0f1214;
+    padding: 18px;
+    border-radius: 10px;
+    color: #e6eef8;
+    z-index: 2147483647;
+    width: 420px;
+    box-shadow: 0 14px 40px rgba(2, 6, 23, 0.6);
+}
+
+.leetsync-modal h4 {
+    margin: 0 0 8px 0
+}
+
+.leetsync-modal .row {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px
+}
+
+.leetsync-append {
+    background: #0b1220;
+    color: #a6c1db;
+    border-radius: 8px;
+    padding: 8px 10px;
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.03)
+}
+
+.leetsync-cancel-2 {
+    background: transparent;
+    color: #94a3b8;
+    border: none;
+    cursor: pointer
+}
