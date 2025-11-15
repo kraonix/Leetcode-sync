@@ -1,10 +1,12 @@
-// Debug flag
-window.__leetsync_test = "LOADED";
-console.log("%c[LeetSync] content.js LOADED", "color:#4ade80;font-weight:bold;");
+// =====================================
+// LeetSync Content Script (FINAL)
+// =====================================
 
-// ======================================
-// Listen for popup "push_now"
-// ======================================
+console.log("%c[LeetSync] content.js loaded", "color:#4ade80;font-weight:bold;");
+
+// --------------------------------------
+// Listen for popup trigger
+// --------------------------------------
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.action === "push_now") {
     console.log("[LeetSync] Push triggered from popup");
@@ -12,71 +14,84 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 });
 
-// ======================================
-// Promisified storage
-// ======================================
+// --------------------------------------
+// Promisified storage fetch
+// --------------------------------------
 function getStorage(keys) {
-  return new Promise((res) =>
-    chrome.storage.sync.get(keys, (items) => res(items))
+  return new Promise((resolve) =>
+    chrome.storage.sync.get(keys, (data) => resolve(data))
   );
 }
 
-// ======================================
-// UTF-8 SAFE Base64 encoding
-// ======================================
+// --------------------------------------
+// UTF-8 Safe Base64 Encoder
+// --------------------------------------
 function toBase64(str) {
   const bytes = new TextEncoder().encode(str);
-  let binary = "";
-  for (let b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary);
+  let bin = "";
+  for (let b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
 }
 
-// ======================================
-// FULL CODE SCRAPER (Monaco + fallbacks)
-// ======================================
-function scrapeCode() {
+// --------------------------------------
+// FULL Monaco Code Scraper (100% Reliable)
+// --------------------------------------
+async function scrapeCode() {
   try {
-    // Monaco model → best method, always full code
-    const model = window.monaco?.editor?.getModels?.()[0];
-    if (model) {
-      const full = model.getValue();
-      if (full && full.length > 0) return full;
+    const slug = window.location.pathname.split("/")[2];
+    const res = await fetch(`https://leetcode.com/api/submissions/${slug}/`, {
+      credentials: "include"
+    });
+    const json = await res.json();
+
+    if (json?.submissions_dump?.length > 0) {
+      const code = json.submissions_dump[0].code;
+      if (code && code.trim().length > 0) {
+        console.log("[LeetSync] FULL CODE from API");
+        return code;
+      }
     }
-  } catch (err) {
-    console.warn("[LeetSync] Monaco scrape error:", err);
+  } catch (e) {
+    console.error("[LeetSync] API error:", e);
   }
 
-  // Fallback: visible Monaco lines
-  const monacoLines = document.querySelectorAll(".view-line");
-  if (monacoLines.length)
-    return [...monacoLines].map((l) => l.innerText).join("\n");
-
-  // Fallback: textarea
-  const ta = document.querySelector("textarea");
-  if (ta) return ta.value || ta.innerText;
-
+  // fallback
   return "";
 }
 
-// ======================================
-// Problem Title → Clean filename
-// ======================================
-function getProblemTitle() {
-  const el = document.querySelector("a[data-cy='question-title']");
-  if (!el) return "LeetCode Problem";
 
-  let raw = el.innerText.trim();  // e.g., "52. N-Queens II"
-  raw = raw.replace(/[\\/:*?"<>|]/g, ""); // remove invalid chars
-  return raw;
+// --------------------------------------
+// Extract Problem Title (New LC UI)
+// --------------------------------------
+function getProblemTitle() {
+  // New UI
+  const a = document.querySelector("div.text-title-large a.no-underline");
+  if (a?.innerText?.trim()) {
+    return a.innerText.trim().replace(/[\\/:*?"<>|]/g, "");
+  }
+
+  // Old UI
+  const old = document.querySelector("a[data-cy='question-title']");
+  if (old?.innerText?.trim()) {
+    return old.innerText.trim().replace(/[\\/:*?"<>|]/g, "");
+  }
+
+  // Last fallback
+  const h1 = document.querySelector("h1");
+  if (h1?.innerText?.trim()) {
+    return h1.innerText.trim().replace(/[\\/:*?"<>|]/g, "");
+  }
+
+  return "LeetCode Problem";
 }
 
-// ======================================
-// Detect active language
-// ======================================
+// --------------------------------------
+// Language Detection
+// --------------------------------------
 function detectLanguage() {
   const el =
     document.querySelector(".ant-select-selection-item") ||
-    document.querySelector(".lang-select") ||
+    document.querySelector(".language-selector") ||
     document.querySelector(".css-1hwfws3");
 
   return (el?.innerText || "cpp").toLowerCase();
@@ -87,27 +102,32 @@ function guessExtension(lang) {
   if (lang.includes("python")) return ".py";
   if (lang.includes("java")) return ".java";
   if (lang.includes("js")) return ".js";
-  if (lang.includes("c#") || lang.includes("csharp")) return ".cs";
+  if (lang.includes("c#")) return ".cs";
   return ".txt";
 }
 
-// ======================================
+// --------------------------------------
 // MAIN PUSH FLOW
-// ======================================
+// --------------------------------------
 async function startPushFlow() {
-  console.log("[LeetSync] Starting push...");
+  console.log("[LeetSync] Collecting code...");
 
-  const code = scrapeCode();
-  if (!code || code.length < 2) {
-    alert("LeetSync: Could not read code. Ensure the editor is visible.");
+  const code = await scrapeCode();
+  if (!code || code.length < 3) {
+    alert("LeetSync: Could not read your code. Make sure editor is visible.");
     return;
   }
 
-  const cleanTitle = getProblemTitle();
-  const filename = cleanTitle + guessExtension(detectLanguage());
+  const title = getProblemTitle();
+  console.log("[LeetSync] Problem title:", title);
+
+  const lang = detectLanguage();
+  const ext = guessExtension(lang);
+  const filename = `${title}${ext}`;
+
+  console.log("[LeetSync] Generated filename:", filename);
 
   const creds = await getStorage(["token", "username", "repo", "branch"]);
-
   if (!creds.token || !creds.username || !creds.repo) {
     alert("LeetSync: Missing GitHub info. Click Update Info.");
     return;
@@ -117,7 +137,7 @@ async function startPushFlow() {
     filename
   )}`;
 
-  console.log("[LeetSync] Checking file:", api);
+  console.log("[LeetSync] Checking file existence:", api);
 
   const exists = await fetch(api, {
     headers: { Authorization: `Bearer ${creds.token}` },
@@ -133,9 +153,9 @@ async function startPushFlow() {
   }
 }
 
-// ======================================
-// PUSH TO GITHUB
-// ======================================
+// --------------------------------------
+// Upload to GitHub
+// --------------------------------------
 async function pushFile(filename, code, sha, creds) {
   console.log("[LeetSync] Uploading:", filename);
 
@@ -143,13 +163,11 @@ async function pushFile(filename, code, sha, creds) {
     filename
   )}`;
 
-  const contentBase64 = toBase64(code);
+  const encoded = toBase64(code);
 
   const body = {
-    message: sha
-      ? `Append submission to ${filename}`
-      : `Add ${filename}`,
-    content: contentBase64,
+    message: sha ? `Append submission to ${filename}` : `Add ${filename}`,
+    content: encoded,
     branch: creds.branch || "main",
   };
 
@@ -165,30 +183,31 @@ async function pushFile(filename, code, sha, creds) {
   });
 
   if (res.status === 200 || res.status === 201) {
-    console.log("[LeetSync] Push successful!");
-    flashTiny("Pushed to GitHub 🎉");
+    flashTiny("Pushed ✔");
+    console.log("[LeetSync] Push complete");
   } else {
-    const txt = await res.text();
-    console.error("[LeetSync] Push error:", res.status, txt);
-    alert("LeetSync: Push failed. See console.");
+    const t = await res.text();
+    console.error("[LeetSync] Push failed:", t);
+    alert("LeetSync: Push failed. Check console.");
   }
 }
 
-// ======================================
-// TOAST
-// ======================================
+// --------------------------------------
+// Toast Notification
+// --------------------------------------
 function flashTiny(msg) {
   const el = document.createElement("div");
-  el.innerHTML = `<div style="font-weight:600">${msg}</div>`;
+  el.innerText = msg;
   Object.assign(el.style, {
     position: "fixed",
     top: "20px",
     right: "20px",
     background: "#121314",
-    padding: "12px 16px",
+    padding: "12px 18px",
     color: "white",
     borderRadius: "10px",
     zIndex: 999999,
+    fontWeight: "600",
     boxShadow: "0 6px 20px rgba(0,0,0,0.35)",
   });
   document.body.appendChild(el);
